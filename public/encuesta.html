@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Proyecto AMA</title>
+
+    <script>
+        registraServiceWorker();
+        async function registraServiceWorker() {
+            if ("serviceWorker" in navigator) {
+                try {
+                    const registro = await navigator.serviceWorker.register("sw.js");
+                    console.log("Service Worker registrado.");
+                    console.log(registro);
+                } catch (e) {
+                    muestraError(e);
+                }
+            }
+        }
+        function muestraError(e) {
+            console.log(e);
+            mensaje.value = e.message;
+        }
+    </script>
+
+    <link rel="icon" sizes="32x32" href="favicon.ico">
+
+    <meta name="theme-color" content="#d49f7f">
+    <link rel="manifest" href="manifest.json">
+
+    <meta name="mobile-web-app-capable" content="yes">
+    <link rel="apple-touch-icon" sizes="2048x2048" href="img/icono-2048.png">
+    <link rel="apple-touch-startup-image" sizes="2048x2048" href="img/icono-2048.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+
+    <link rel="stylesheet" href="css/estilos.css">
+    <script type="module" src="js/herramientas-abc.js"></script>
+    <script type="module" src="js/mi-nav.js"></script>
+    <script src="js/util.js"></script>
+
+    <!-- update the version number as needed -->
+    <script src="/__/firebase/7.15.5/firebase-app.js"></script>
+    <!-- include only the Firebase features as you need -->
+    <script src="/__/firebase/7.15.5/firebase-auth.js"></script>
+    <script src="/__/firebase/7.15.5/firebase-firestore.js"></script>
+    <script src="/__/firebase/7.15.5/firebase-storage.js"></script>
+    <!-- initialize the SDK after all desired features are loaded -->
+    <script src="/__/firebase/init.js"></script>
+
+</head>
+
+<body>
+
+    <div class="cuerpo">
+        <form action="javascript:guarda()">
+            <header>
+                <h1>Cervecería</h1>
+                <mi-nav></mi-nav>
+            </header>
+            <h2>Encuesta</h2>
+            <p>
+                <herramientas-abc></herramientas-abc>
+            </p>
+
+            <p>Nombre: <input id="nombre" type="text" placeholder="Nombre completo" required></p>
+            <p>Edad: <output id="salidaRango"></output> años <br><span>
+                    18
+                    <input id="rango" class="edad" type="range" min="18" max="55" step="1"
+                        onchange="muestraEdad(this.value);">
+                    55
+                </span></p>
+            <p>Ocupación: <input id="ocupacion" type="text" placeholder="¿A qué se dedica?" required></p>
+
+            <fieldset>
+                <legend>Estilo de cerveza preferido</legend>
+                <select id="estilo">
+                    <option>Cargando…</option>
+                </select>
+            </fieldset>
+            <br><br>
+            <ul id="lista" class="persona"> Resutados de encuestas:
+                <li><progress max="100">Cargando...</progress></li>
+            </ul>
+            <br><br>
+        </form>
+    </div>
+    <footer><br><button type="button" onclick="terminaSesión()">Terminar Sesión</button><br><br>
+        Copyright &copy; 2020 Andrea Meza Alvarado</footer>
+    <script>
+        let id = "";
+        let usuario = "";
+        const auth = firebase.auth();
+        const storage = firebase.storage();
+        const provider = new firebase.auth.GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: "select_account" });
+        const firestore = firebase.firestore();
+        auth.onAuthStateChanged(
+            async usuarioAuth => {
+                if (usuarioAuth && usuarioAuth.email) {
+                    usuario = usuarioAuth.email;
+                    cargaEstilos();
+                    agrega();
+                    muestraLista();
+                } else {
+                    await auth.signInWithRedirect(provider);
+                }
+            },
+            procesaError
+        );
+        function cargaEstilos() {
+            firestore.collection("ESTILO").onSnapshot(
+                querySnapshot => {
+                    estilo.innerHTML = `<option value="">-- Escoge tu preferido --</option>`;
+                    querySnapshot.forEach(doc => {
+                        const data = doc.data();
+                        estilo.innerHTML +=
+                            `<option value="${cod(doc.id)}">
+                             ${cod(data.NOM_EST)}
+                         </option>`;
+                    });
+                },
+                e => {
+                    procesaError(e);
+                    cargaEstilos();
+                }
+            );
+        }
+        function muestraLista() {
+            firestore.collection("PERSONA").onSnapshot(
+                async querySnapshot => {
+                    const promesas = [];
+                    querySnapshot.forEach(doc => promesas.push(calculaCelda(doc)));
+                    const celdas = await Promise.all(promesas);
+                    lista.innerHTML = "";
+                    for (const celda of celdas) {
+                        lista.innerHTML += celda;
+                    }
+                },
+                e => {
+                    procesaError(e);
+                    muestraLista();
+                }
+            );
+        }
+
+        async function calculaCelda(doc) {
+            const data = doc.data();
+            const estDoc = data.EST_ID ? await firestore.collection("ESTILO").doc(data.EST_ID).get() : null;
+            const estNombre = (estDoc && estDoc.exists) ? estDoc.data().NOM_EST : "Sin seleccionar";
+            return (
+                `<li class="doc" onclick="muestra('${cod(doc.id)}')">
+                        <strong>${cod(doc.data().PER_NOMBRE)}</strong><br>
+                        ${cod(doc.data().EDAD)} años<br>
+                        ${cod(doc.data().PER_OCUP)}<br>
+                        ${cod(estNombre)}<br>
+                </li><br>`);
+        }
+
+        async function muestra(selección) {
+            try {
+                agregar.disabled = false;
+                eliminar.disabled = false;
+                let doc = await firestore.collection("PERSONA").doc(selección).get();
+
+                if (doc.exists) {
+                    id = doc.id;
+                    let data = doc.data();
+                    nombre.value = data.PER_NOMBRE;
+                    rango.value = data.EDAD;
+                    salidaRango.value = data.EDAD;
+                    ocupacion.value = data.PER_OCUP;
+                    estilo.value = data.EST_ID || "";
+                } else {
+                    alert("La persona seleccionada no está registrada.");
+                    agrega();
+                }
+            } catch (e) {
+                procesaError(e)
+            }
+        }
+
+        function leeModelo() {
+            return {
+                PER_NOMBRE: nombre.value.trim(), EDAD: rango.value, PER_OCUP: ocupacion.value.trim(), EST_ID: estilo.value || null
+            };
+        }
+
+        async function guarda() {
+            try {
+                if (id) {
+                    await firestore.collection("PERSONA").doc(id).set(leeModelo());
+                } else {
+                    await firestore.collection("PERSONA").add(leeModelo());
+                }
+                agrega();
+            } catch (e) {
+                procesaError(e);
+            }
+        }
+
+        function agrega() {
+            agregar.disabled = true;
+            eliminar.disabled = true;
+            id = "";
+            salidaRango.value = "";
+            rango.value = 36;
+            nombre.value = "";
+            ocupacion.value = "";
+            estilo.value = "";
+        }
+
+        async function elimina() {
+            try {
+                if (confirm("Confirma la eliminación.")) {
+                    await firestore.collection("PERSONA").doc(id).delete();
+                    storage.ref(id).delete();
+                    agrega();
+                }
+            } catch (e) {
+                procesaError(e);
+            }
+        }
+        async function terminaSesión() {
+            try {
+                await auth.signOut();
+            } catch (e) {
+                procesaError(e);
+            }
+        }
+        function procesaError(e) {
+            console.log(e);
+            alert(e.message);
+        }
+        function muestraEdad(val) {
+            document.getElementById('salidaRango').value = val;
+        }
+        function procesaError(e) {
+            console.log(e);
+            alert(e.message);
+        }
+
+        //@ts-check
+        try {
+            // @ts-ignore
+            let app = firebase.app();
+            let features = ["auth", "firestore", "storage"]
+                .filter(feature => typeof app[feature] === "function");
+            // @ts-ignore
+        } catch (e) {
+            muestraError(e);
+        }
+
+    </script>
+</body>
+
+</html>

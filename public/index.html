@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Proyecto AMA</title>
+
+  <script>
+    registraServiceWorker();
+    async function registraServiceWorker() {
+      if ("serviceWorker" in navigator) {
+        try {
+          const registro = await navigator.serviceWorker.register("sw.js");
+          console.log("Service Worker registrado.");
+          console.log(registro);
+        } catch (e) {
+          muestraError(e);
+        }
+      }
+    }
+    function muestraError(e) {
+      console.log(e);
+      mensaje.value = e.message;
+    }
+  </script>
+
+  <link rel="icon" sizes="32x32" href="favicon.ico">
+
+  <meta name="theme-color" content="#d49f7f">
+  <link rel="manifest" href="manifest.json">
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="apple-touch-icon" sizes="2048x2048" href="img/icono-2048.png">
+  <link rel="apple-touch-startup-image" sizes="2048x2048"
+    href="img/icono-2048.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+
+  <link rel="stylesheet" href="css/estilos.css">
+  <script type="module" src="js/herramientas-abc.js"></script>
+  <script type="module" src="js/mi-nav.js"></script>
+  <script src="js/util.js"></script>
+  <!-- update the version number as needed -->
+  <script src="/__/firebase/7.15.5/firebase-app.js"></script>
+  <!-- include only the Firebase features as you need -->
+  <script src="/__/firebase/7.15.5/firebase-auth.js"></script>
+  <script src="/__/firebase/7.15.5/firebase-firestore.js"></script>
+  <script src="/__/firebase/7.15.5/firebase-storage.js"></script>
+  <!-- initialize the SDK after all desired features are loaded -->
+  <script src="/__/firebase/init.js"></script>
+</head>
+
+<body>
+<div class="cuerpo">
+  <form action="javascript:guarda()">
+    <header>
+      <h1>Cervecería</h1>
+      <mi-nav></mi-nav>
+    </header>
+    <h2>Estilos</h2>
+    <p>
+      <herramientas-abc></herramientas-abc>
+    </p>
+
+    <p>Estilo: <input id="nombre" type="text" placeholder="Estilo de cerveza" required></p>
+    <p>Descripción: <br> <textarea id="descripcion" required></textarea></p>
+
+    <fieldset>
+      <legend>Imagen</legend>
+      <input id="imagen" type="file" accept=".png,.jpg,.jpeg,.gif">
+    </fieldset>
+
+    <figure id="figure">
+      <img id="img" alt="Imagen de Estilo">
+    </figure>
+
+    <ul id="lista" class="estilos">
+      <li><progress max="100">Cargando...</progress></li>
+    </ul> 
+    <br><br>
+  </form>
+</div>
+  <footer>
+    <br>
+    <button type="button" onclick="terminaSesión()">Terminar Sesión</button><br><br>
+    Copyright &copy; 2020 Andrea Meza Alvarado
+  </footer>
+
+  <script>
+    let id = "";
+    let usuario = "";
+    const auth = firebase.auth();
+    const storage = firebase.storage();
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: "select_account" });
+    const firestore = firebase.firestore();
+    auth.onAuthStateChanged(
+      async usuarioAuth => {
+        if (usuarioAuth && usuarioAuth.email) {
+          usuario = usuarioAuth.email;
+          agrega();
+          muestraLista();
+        } else {
+          await auth.signInWithRedirect(provider);
+        }
+      },
+      procesaError
+    );
+    
+
+    function agrega() {
+      figure.hidden = true;
+      agregar.disabled = true;
+      eliminar.disabled = true;
+      imagen.required = true;
+      id = "";
+      nombre.value = "";
+      descripcion.value = "";
+      imagen.value = "";
+    }
+
+    function muestraLista() {
+      firestore.collection("ESTILO").onSnapshot(
+        async querySnapshot => {
+          const promesas = [];
+          querySnapshot.forEach(doc => promesas.push(calculaCelda(doc)));
+          const celdas = await Promise.all(promesas);
+          lista.innerHTML = "";
+          for (const celda of celdas) {
+            lista.innerHTML += celda;
+          }
+        },
+        e => {
+          procesaError(e);
+          muestraLista();
+        }
+      );
+    }
+
+    async function calculaCelda(doc) {
+      const data = doc.data();
+      const url = await storage.ref(doc.id).getDownloadURL();
+      return (
+        `<li class="doc" onclick="muestra('${cod(doc.id)}')">
+                    <figure>
+                        <img src="${cod(url)}">
+                    </figure>
+                    <div>
+                        <strong>${cod(doc.data().NOM_EST)}</strong><br>
+                        ${cod(doc.data().DESC_EST)}<br>
+                    </div>
+                </li><br>`);
+    }
+    async function muestra(selección) {
+      try {
+        agregar.disabled = false;
+        eliminar.disabled = false;
+        figure.hidden = false;
+        imagen.required = false;
+        let doc = await firestore.collection("ESTILO").doc(selección).get();
+        if (doc.exists) {
+          id = doc.id;
+          let data = doc.data();
+          imagen.value = "";
+          nombre.value = data.NOM_EST;
+          descripcion.value = data.DESC_EST || "";
+          img.src = await storage.ref(doc.id).getDownloadURL();
+        } else {
+          alert("El estilo seleccionado no esta registrado.");
+          agrega();
+        }
+      } catch (e) {
+        procesaError(e)
+      }
+    }
+
+    function leeModelo() {
+      return {
+        NOM_EST: nombre.value, DESC_EST: descripcion.value
+      };
+    }
+    async function guarda() {
+      try {
+        let ref;
+        if (id) {
+            ref = await firestore.collection("ESTILO").doc(id).set(leeModelo());
+          } else {
+            ref = await firestore.collection("ESTILO").add(leeModelo());
+          }
+        if (fileSeleccionado(imagen)) {
+          const refStorage = storage.ref(ref.id);
+          await refStorage.put(imagen.files[0]);
+        }
+        agrega();
+        muestraLista();
+      } catch (e) {
+        procesaError(e);
+      }
+    }
+
+    async function elimina() {
+      try {
+        if (confirm("Confirma la eliminación.")) {
+          await firestore.collection("ESTILO").doc(id).delete();
+          storage.ref(id).delete();
+          agrega();
+        }
+      } catch (e) {
+        procesaError(e);
+      }
+    }
+
+    async function terminaSesión() {
+      try {
+        await auth.signOut();
+      } catch (e) {
+        procesaError(e);
+      }
+    }
+    function procesaError(e) {
+      console.log(e);
+      alert(e.message);
+    }
+
+    //@ts-check
+    try {
+        // @ts-ignore
+        let app = firebase.app();
+        let features = ["auth", "firestore", "storage"]
+          .filter(feature => typeof app[feature] === "function");
+        // @ts-ignore
+      } catch (e) {
+        muestraError(e);
+      }
+
+  </script>
+
+</body>
+
+</html>
